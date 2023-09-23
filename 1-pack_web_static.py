@@ -1,18 +1,24 @@
 #!/usr/bin/python3
-"""ALX SE First Fabric Module."""
-from datetime import datetime
+from datetime import date
 from fabric.api import local
-import os.path
+from time import strftime
 
 
 def do_pack():
-    """Generate a .tgz archive from the contents of the web_static."""
-    """Folder of your AirBnB Clone."""
-    date = datetime.now().strftime("%Y%m%d%H%M%S")
-    file_path = "versions/web_static_{}.tgz".format(date)
-    if os.path.isdir("versions") is False:
-        local(" mkdir versions")
-    local('tar -cvzf ' + file_path + ' web_static')
-    if os.path.exists(file_path):
-        return file_path
-    return None
+    """
+    Creates a compressed archive of the contents of the web_static directory.
+    The resulting archive is stored in a subdirectory called versions,
+    and the filename includes the current date and time.
+    Returns the path to the created archive on success, or None on failure.
+    """
+
+    filename = strftime("%Y%m%d%H%M%S")
+    try:
+        local("mkdir -p versions")
+        local("tar -czvf versions/web_static_{}.tgz web_static/"
+              .format(filename))
+
+        return "versions/web_static_{}.tgz".format(filename)
+
+    except Exception as e:
+        return None

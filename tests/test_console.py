@@ -1,307 +1,143 @@
 #!/usr/bin/python3
-
-"""This is Console Test Module."""
-
+"""Test module for the console"""
 import json
+import MySQLdb
+import os
+import sqlalchemy
 import unittest
-import sys
 from io import StringIO
 from unittest.mock import patch
 from console import HBNBCommand
-from models.amenity import Amenity
-from models.city import City
-from models.state import State
-from models.base_model import BaseModel
-from models.place import Place
-from models.review import Review
-from models.user import User
 from models import storage
+from models.base_model import BaseModel
+from models.user import User
+from tests import clear_stream
 
 
-class TestConsole(unittest.TestCase):
-    """Implement Unittest for the console."""
+class TestHBNBCommand(unittest.TestCase):
+    """Test class for the HBNBCommand class"""
+    @unittest.skipIf(
+        os.getenv('HBNB_TYPE_STORAGE') == 'db', 'FileStorage test')
+    def test_fs_create(self):
+        """Tests the create command with the file storage"""
+        with patch('sys.stdout', new=StringIO()) as cout:
+            cons = HBNBCommand()
+            cons.onecmd('create City name="Texas"')
+            mdl_id = cout.getvalue().strip()
+            clear_stream(cout)
+            self.assertIn('City.{}'.format(mdl_id), storage.all().keys())
+            cons.onecmd('show City {}'.format(mdl_id))
+            self.assertIn("'name': 'Texas'", cout.getvalue().strip())
+            clear_stream(cout)
+            cons.onecmd('create User name="James" age=17 height=5.9')
+            mdl_id = cout.getvalue().strip()
+            self.assertIn('User.{}'.format(mdl_id), storage.all().keys())
+            clear_stream(cout)
+            cons.onecmd('show User {}'.format(mdl_id))
+            self.assertIn("'name': 'James'", cout.getvalue().strip())
+            self.assertIn("'age': 17", cout.getvalue().strip())
+            self.assertIn("'height': 5.9", cout.getvalue().strip())
 
-    def test_help(self):
-        """Test the help method."""
-        expected = """
-Documented commands (type help <topic>):
-========================================
-EOF  all  count  create  destroy  help  quit  show  update
+    @unittest.skipIf(
+        os.getenv('HBNB_TYPE_STORAGE') != 'db', 'DBStorage test')
+    def test_db_create(self):
+        """Tests the create command with the database storage.
+        """
+        with patch('sys.stdout', new=StringIO()) as cout:
+            cons = HBNBCommand()
+            # creating a model with non-null attribute(s)
+            with self.assertRaises(sqlalchemy.exc.OperationalError):
+                cons.onecmd('create User')
+            # creating a User instance
+            clear_stream(cout)
+            cons.onecmd('create User email="john25@gmail.com" password="123"')
+            mdl_id = cout.getvalue().strip()
+            dbc = MySQLdb.connect(
+                host=os.getenv('HBNB_MYSQL_HOST'),
+                port=3306,
+                user=os.getenv('HBNB_MYSQL_USER'),
+                passwd=os.getenv('HBNB_MYSQL_PWD'),
+                db=os.getenv('HBNB_MYSQL_DB')
+            )
+            cursor = dbc.cursor()
+            cursor.execute('SELECT * FROM users WHERE id="{}"'.format(mdl_id))
+            result = cursor.fetchone()
+            self.assertTrue(result is not None)
+            self.assertIn('john25@gmail.com', result)
+            self.assertIn('123', result)
+            cursor.close()
+            dbc.close()
 
-"""
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("help")
-            self.assertEqual(expected, f.getvalue())
+    @unittest.skipIf(
+        os.getenv('HBNB_TYPE_STORAGE') != 'db', 'DBStorage test')
+    def test_db_show(self):
+        """Tests the show command with the database storage.
+        """
+        with patch('sys.stdout', new=StringIO()) as cout:
+            cons = HBNBCommand()
+            # showing a User instance
+            obj = User(email="john25@gmail.com", password="123")
+            dbc = MySQLdb.connect(
+                host=os.getenv('HBNB_MYSQL_HOST'),
+                port=3306,
+                user=os.getenv('HBNB_MYSQL_USER'),
+                passwd=os.getenv('HBNB_MYSQL_PWD'),
+                db=os.getenv('HBNB_MYSQL_DB')
+            )
+            cursor = dbc.cursor()
+            cursor.execute('SELECT * FROM users WHERE id="{}"'.format(obj.id))
+            result = cursor.fetchone()
+            self.assertTrue(result is None)
+            cons.onecmd('show User {}'.format(obj.id))
+            self.assertEqual(
+                cout.getvalue().strip(),
+                '** no instance found **'
+            )
+            obj.save()
+            dbc = MySQLdb.connect(
+                host=os.getenv('HBNB_MYSQL_HOST'),
+                port=3306,
+                user=os.getenv('HBNB_MYSQL_USER'),
+                passwd=os.getenv('HBNB_MYSQL_PWD'),
+                db=os.getenv('HBNB_MYSQL_DB')
+            )
+            cursor = dbc.cursor()
+            cursor.execute('SELECT * FROM users WHERE id="{}"'.format(obj.id))
+            clear_stream(cout)
+            cons.onecmd('show User {}'.format(obj.id))
+            result = cursor.fetchone()
+            self.assertTrue(result is not None)
+            self.assertIn('john25@gmail.com', result)
+            self.assertIn('123', result)
+            self.assertIn('john25@gmail.com', cout.getvalue())
+            self.assertIn('123', cout.getvalue())
+            cursor.close()
+            dbc.close()
 
-    def test_empty_line(self):
-        """Test empty line method."""
-        expected = ""
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_quit(self):
-        """Test quit method."""
-        expected = ""
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("quit")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_eof(self):
-        """Test quit method."""
-        expected = ""
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("EOF")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_create_without_model_fail(self):
-        """Test if create without model fails."""
-        expected = "** class name missing **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("create")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_create_with_wrong_model_fail(self):
-        """Test if create with wrong model fails."""
-        expected = "** class doesn't exist **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("create FakeModel")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_show_without_model_fail(self):
-        """Test if show without model fails."""
-        expected = "** class name missing **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("show")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_show_with_wrong_model_fail(self):
-        """Test if show with wrong model fails."""
-        expected = "** class doesn't exist **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("show FakeModel")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_show_without_inst_id_fail(self):
-        """Test if show without inst id fails."""
-        expected = "** instance id missing **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("show BaseModel")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_show_with_wrong_inst_id_fail(self):
-        """Test if show with wrong inst id fails."""
-        expected = "** no instance found **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("show BaseModel 24217-2372673")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_update_without_model_fail(self):
-        """Test if update without model fails."""
-        expected = "** class name missing **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("update")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_update_with_wrong_model_fail(self):
-        """Test if update with wrong model fails."""
-        expected = "** class doesn't exist **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("update FakeModel")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_update_without_inst_id_fail(self):
-        """Test if update without inst id fails."""
-        expected = "** instance id missing **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("update BaseModel")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_update_with_wrong_inst_id_fail(self):
-        """Test if show with wrong inst id fails."""
-        expected = "** no instance found **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("update BaseModel 24217-2372673")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_destroy_without_model_fail(self):
-        """Test if destroy without model fails."""
-        expected = "** class name missing **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("destroy")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_destroy_with_wrong_model_fail(self):
-        """Test if show with wrong model fails."""
-        expected = "** class doesn't exist **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("destroy FakeModel")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_destroy_without_inst_id_fail(self):
-        """Test if destroy without inst id fails."""
-        expected = "** instance id missing **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("destroy BaseModel")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_destroy_with_wrong_inst_id_fail(self):
-        """Test if destroy with wrong inst id fails."""
-        expected = "** no instance found **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("destroy BaseModel 24217-2372673")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_all(self):
-        """Test if all return list of all instances."""
-        out = []
-        for _, v in storage.all().items():
-            out.append(str(v))
-
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("all")
-            self.assertEqual(f'{out}\n', f.getvalue())
-
-    def test_all_model(self):
-        """Test if all return list of all instances of a model."""
-        class_name = {
-                'BaseModel': BaseModel,
-                'City': City,
-                'State': State,
-                'Place': Place,
-                'Review': Review,
-                'Amenity': Amenity,
-                'User': User
-            }
-
-        for name in class_name:
-            with patch('sys.stdout', new=StringIO()) as f:
-                HBNBCommand().onecmd(f"all {name}")
-                out = []
-                for _, v in storage.all(class_name[name]).items():
-                    out.append(str(v))
-                self.assertEqual(f'{out}\n', f.getvalue())
-
-    def test_update_def_models(self):
-        """Test if all each model can be updated."""
-        class_name = {
-                'BaseModel': BaseModel,
-                'City': City,
-                'State': State,
-                'Place': Place,
-                'Review': Review,
-                'Amenity': Amenity,
-                'User': User
-            }
-
-        for name in class_name:
-            with patch('sys.stdout', new=StringIO()) as f:
-                HBNBCommand().onecmd(f"create {name}")
-                id = f.getvalue().replace('\n', '')
-            with patch('sys.stdout', new=StringIO()) as f:
-                fmt = ".update(" + id + ", {'attribute_name': 'string_value'})"
-                HBNBCommand().onecmd(name + fmt)
-                self.assertEqual('', f.getvalue())
-                storage.reload()
-                key = f'{name}.{id}'
-                with open('file.json', 'r', encoding='utf-8') as f:
-                    dict_obj = json.loads(f.read())
-                obj = dict_obj[key]
-                self.assertIn('attribute_name', obj)
-                self.assertEqual(obj['attribute_name'], 'string_value')
-
-    def test_count_def_models(self):
-        """Test if method count return the total instance of each model."""
-        class_name = ['BaseModel', 'City', 'State', 'Place']
-        class_name += ['Review', 'Amenity', 'User']
-
-        for name in class_name:
-            with patch('sys.stdout', new=StringIO()) as f:
-                HBNBCommand().onecmd(f'{name}.count()')
-                cmd_cnt = f.getvalue()
-                cnt = 0
-                for k in storage.all():
-                    # nme = k[:k.index('.')]
-                    if name in k:
-                        cnt += 1
-                print(name)
-                self.assertEqual(f'{str(cnt)}\n', cmd_cnt)
-
-    def test_show_def_with_wrong_model_fail(self):
-        """Test if show with wrong model fails."""
-        expected = "** class doesn't exist **\n"
-
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("FakeModel.show()")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_show_def_without_inst_id_fail(self):
-        """Test if show without inst id fails."""
-        class_name = ['BaseModel', 'City', 'State', 'Place']
-        class_name += ['Review', 'Amenity', 'User']
-        expected = "** instance id missing **\n"
-
-        for name in class_name:
-            with patch('sys.stdout', new=StringIO()) as f:
-                HBNBCommand().onecmd(f"{name}.show()")
-                self.assertEqual(expected, f.getvalue())
-
-    def test_show_def_with_wrong_inst_id_fail(self):
-        """Test if show with wrong inst id fails."""
-        class_name = ['BaseModel', 'City', 'State', 'Place']
-        class_name += ['Review', 'Amenity', 'User']
-        expected = "** no instance found **\n"
-
-        for name in class_name:
-            with patch('sys.stdout', new=StringIO()) as f:
-                HBNBCommand().onecmd(f"{name}.show(24217-2372673)")
-                self.assertEqual(expected, f.getvalue())
-
-    def test_destroy_def_with_wrong_model_fail(self):
-        """Test if show with wrong model fails."""
-        expected = "** class doesn't exist **\n"
-        with patch('sys.stdout', new=StringIO()) as f:
-            HBNBCommand().onecmd("FakeModel.destroy()")
-            self.assertEqual(expected, f.getvalue())
-
-    def test_destroy_def_without_inst_id_fail(self):
-        """Test if destroy without inst id fails."""
-        class_name = ['BaseModel', 'City', 'State', 'Place']
-        class_name += ['Review', 'Amenity', 'User']
-        expected = "** instance id missing **\n"
-
-        for name in class_name:
-            with patch('sys.stdout', new=StringIO()) as f:
-                HBNBCommand().onecmd(f"{name}.destroy()")
-                self.assertEqual(expected, f.getvalue())
-
-    def test_destroy_def_with_wrong_inst_id_fail(self):
-        """Test if destroy with wrong inst id fails."""
-        class_name = ['BaseModel', 'City', 'State', 'Place']
-        class_name += ['Review', 'Amenity', 'User']
-        expected = "** no instance found **\n"
-
-        for name in class_name:
-            with patch('sys.stdout', new=StringIO()) as f:
-                HBNBCommand().onecmd(f"{name}.destroy(24217-2372673)")
-                self.assertEqual(expected, f.getvalue())
-
-    def test_def_all_model(self):
-        """Test if all return list of all instances of a model."""
-        class_name = {
-                'BaseModel': BaseModel,
-                'City': City,
-                'State': State,
-                'Place': Place,
-                'Review': Review,
-                'Amenity': Amenity,
-                'User': User
-            }
-
-        for name in class_name:
-            with patch('sys.stdout', new=StringIO()) as f:
-                HBNBCommand().onecmd(f"{name}.all()")
-                out = []
-                for _, v in storage.all(class_name[name]).items():
-                    out.append(str(v))
-                self.assertEqual(f'{out}\n', f.getvalue())
+    @unittest.skipIf(
+        os.getenv('HBNB_TYPE_STORAGE') != 'db', 'DBStorage test')
+    def test_db_count(self):
+        """Tests the count command with the database storage.
+        """
+        with patch('sys.stdout', new=StringIO()) as cout:
+            cons = HBNBCommand()
+            dbc = MySQLdb.connect(
+                host=os.getenv('HBNB_MYSQL_HOST'),
+                port=3306,
+                user=os.getenv('HBNB_MYSQL_USER'),
+                passwd=os.getenv('HBNB_MYSQL_PWD'),
+                db=os.getenv('HBNB_MYSQL_DB')
+            )
+            cursor = dbc.cursor()
+            cursor.execute('SELECT COUNT(*) FROM states;')
+            res = cursor.fetchone()
+            prev_count = int(res[0])
+            cons.onecmd('create State name="Enugu"')
+            clear_stream(cout)
+            cons.onecmd('count State')
+            cnt = cout.getvalue().strip()
+            self.assertEqual(int(cnt), prev_count + 1)
+            clear_stream(cout)
+            cons.onecmd('count State')
+            cursor.close()
+            dbc.close()

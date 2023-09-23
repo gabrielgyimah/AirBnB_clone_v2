@@ -1,25 +1,28 @@
 #!/usr/bin/python3
-"""ALX SE Flask Module."""
+"""
+starts a Flask web application; listens on 0.0.0.0, port 5000
+uses storage for fetching data from the storage engine
+"""
+from flask import Flask, render_template
 from models import storage
 from models.state import State
-from flask import Flask, render_template
 
 
 app = Flask(__name__)
 
 
-@app.route('/cities_by_states', strict_slashes=False)
-def list_state():
-    """Render list of all states and cities link to them."""
-    states_list = storage.all(State)
-    return render_template('8-cities_by_states.html', states=states_list)
-
-
 @app.teardown_appcontext
-def close_session(exception=None):
-    """Close the current session."""
+def close(self):
+    """ Method to close the session """
     storage.close()
 
 
+@app.route('/cities_by_states', strict_slashes=False)
+def cities_by_states():
+    """Displays a html page with states and cities"""
+    states = storage.all(State)
+    return render_template('8-cities_by_states.html', states=states)
+
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0')
+    app.run(host="0.0.0.0", port="5000")
